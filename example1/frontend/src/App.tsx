@@ -3,14 +3,14 @@ import './App.css';
 import grid from './assets/grid.png';
 import playerO from './assets/O.png';
 import playerX from './assets/X.png';
-import dia1 from './assets/diagonal1.png';
-import dia2 from './assets/diagonal2.png';
+import diagonal1 from './assets/diagonal1.png';
+import diagonal2 from './assets/diagonal2.png';
 import row1 from './assets/vertical1.png';
 import row2 from './assets/vertical2.png';
 import row3 from './assets/vertical3.png';
-import col1 from './assets/horizontal1.png';
-import col2 from './assets/horizontal2.png';
-import col3 from './assets/horizontal3.png';
+import column1 from './assets/horizontal1.png';
+import column2 from './assets/horizontal2.png';
+import column3 from './assets/horizontal3.png';
 import { useMachine } from "@xstate/react";
 import { Machine, assign } from "xstate";
 import { Option, none, some, fold, isSome, chain } from "fp-ts/Option";
@@ -20,46 +20,42 @@ type Player = 'X' | 'O'
 
 type Coordinate = 1 | 2 | 3
 
-type Coordinates =
-  { row: Coordinate; column: Coordinate }
+type Coordinates = { row: Coordinate; column: Coordinate }
 
-type Action = { kind: 'Click' } | { kind: 'Played', player: Player }
+type CellState = { kind: 'Playable' } | { kind: 'Played', player: Player }
 
-type PlayedEvent =
-  { type: 'PLAYED', payload: Coordinates }
+type Cell = Coordinates & { state: CellState }
 
-type Event =
-  | PlayedEvent
-  | { type: 'RESTART' }
-
-type Board = {
-  row: Coordinate,
-  column: Coordinate,
-  action: Action,
-}[]
+type Board = [Cell, Cell, Cell, Cell, Cell, Cell, Cell, Cell, Cell]
 
 type ResultType =
   | 'Draw'
   | 'Row1'
   | 'Row2'
   | 'Row3'
-  | 'Col1'
-  | 'Col2'
-  | 'Col3'
-  | 'Dia1'
-  | 'Dia2'
+  | 'Column1'
+  | 'Column2'
+  | 'Column3'
+  | 'Diagonal1'
+  | 'Diagonal2'
 
-type Result = { result: Extract<ResultType, 'Draw'> } | { result: Exclude<ResultType, 'Draw'>, player: Player }
+type Result = { type: Extract<ResultType, 'Draw'> } | { type: Exclude<ResultType, 'Draw'>, player: Player }
 
-type Accumulator = Record<ResultType, Option<{ player: Player, count: number }>>
+type Event =
+  | PlayedEvent
+  | RestartedEvent
+
+type RestartedEvent = { type: 'RESTARTED' }
+type PlayedEvent = { type: 'PLAYED', payload: Coordinates }
 
 type Context =
   {
-    turn: Player
-    accumulators: Accumulator
+    matchScore: MatchScore
     board: Board
     result: Option<Result>
   }
+
+type MatchScore = Record<ResultType, Option<{ player: Player, count: number }>>
 
 type Scheme = {
   states: {
@@ -74,32 +70,94 @@ const RESULT_TO_FIGURE: Record<ResultType, string | undefined> = {
   'Row1': row1,
   'Row2': row2,
   'Row3': row3,
-  'Col1': col1,
-  'Col2': col2,
-  'Col3': col3,
-  'Dia1': dia1,
-  'Dia2': dia2,
+  'Column1': column1,
+  'Column2': column2,
+  'Column3': column3,
+  'Diagonal1': diagonal1,
+  'Diagonal2': diagonal2,
 }
 
-function resultOfAccumulator(accumulator: Accumulator): Option<Result> {
-  if (isSome(accumulator.Col1) && accumulator.Col1.value.count === 3) {
-    return some({ result: 'Col1', player: accumulator.Col1.value.player } as const)
-  } else if (isSome(accumulator.Col2) && accumulator.Col2.value.count === 3) {
-    return some({ result: 'Col2', player: accumulator.Col2.value.player } as const)
-  } else if (isSome(accumulator.Col3) && accumulator.Col3.value.count === 3) {
-    return some({ result: 'Col3', player: accumulator.Col3.value.player } as const)
-  } else if (isSome(accumulator.Row1) && accumulator.Row1.value.count === 3) {
-    return some({ result: 'Row1', player: accumulator.Row1.value.player } as const)
-  } else if (isSome(accumulator.Row2) && accumulator.Row2.value.count === 3) {
-    return some({ result: 'Row2', player: accumulator.Row2.value.player } as const)
-  } else if (isSome(accumulator.Row3) && accumulator.Row3.value.count === 3) {
-    return some({ result: 'Row3', player: accumulator.Row3.value.player } as const)
-  } else if (isSome(accumulator.Dia1) && accumulator.Dia1.value.count === 3) {
-    return some({ result: 'Dia1', player: accumulator.Dia1.value.player } as const)
-  } else if (isSome(accumulator.Dia2) && accumulator.Dia2.value.count === 3) {
-    return some({ result: 'Dia2', player: accumulator.Dia2.value.player } as const)
-  } else if (isSome(accumulator.Draw) && accumulator.Draw.value.count === 9) {
-    return some({ result: 'Draw' } as const)
+const DEFAULT_CONTEXT: Context = {
+  result: none,
+  matchScore: {
+    'Draw': none,
+    'Row1': none,
+    'Row2': none,
+    'Row3': none,
+    'Column1': none,
+    'Column2': none,
+    'Column3': none,
+    'Diagonal1': none,
+    'Diagonal2': none,
+  },
+  board: [
+    {
+      row: 1,
+      column: 1,
+      state: { kind: 'Playable' },
+    },
+    {
+      row: 2,
+      column: 1,
+      state: { kind: 'Playable' },
+    },
+    {
+      row: 3,
+      column: 1,
+      state: { kind: 'Playable' },
+    },
+    {
+      row: 1,
+      column: 2,
+      state: { kind: 'Playable' },
+    },
+    {
+      row: 2,
+      column: 2,
+      state: { kind: 'Playable' },
+    },
+    {
+      row: 3,
+      column: 2,
+      state: { kind: 'Playable' },
+    },
+    {
+      row: 1,
+      column: 3,
+      state: { kind: 'Playable' },
+    },
+    {
+      row: 2,
+      column: 3,
+      state: { kind: 'Playable' },
+    },
+    {
+      row: 3,
+      column: 3,
+      state: { kind: 'Playable' },
+    },
+  ]
+}
+
+function resultOfMatchScore(matchScore: MatchScore): Option<Result> {
+  if (isSome(matchScore.Column1) && matchScore.Column1.value.count === 3) {
+    return some({ type: 'Column1', player: matchScore.Column1.value.player } as const)
+  } else if (isSome(matchScore.Column2) && matchScore.Column2.value.count === 3) {
+    return some({ type: 'Column2', player: matchScore.Column2.value.player } as const)
+  } else if (isSome(matchScore.Column3) && matchScore.Column3.value.count === 3) {
+    return some({ type: 'Column3', player: matchScore.Column3.value.player } as const)
+  } else if (isSome(matchScore.Row1) && matchScore.Row1.value.count === 3) {
+    return some({ type: 'Row1', player: matchScore.Row1.value.player } as const)
+  } else if (isSome(matchScore.Row2) && matchScore.Row2.value.count === 3) {
+    return some({ type: 'Row2', player: matchScore.Row2.value.player } as const)
+  } else if (isSome(matchScore.Row3) && matchScore.Row3.value.count === 3) {
+    return some({ type: 'Row3', player: matchScore.Row3.value.player } as const)
+  } else if (isSome(matchScore.Diagonal1) && matchScore.Diagonal1.value.count === 3) {
+    return some({ type: 'Diagonal1', player: matchScore.Diagonal1.value.player } as const)
+  } else if (isSome(matchScore.Diagonal2) && matchScore.Diagonal2.value.count === 3) {
+    return some({ type: 'Diagonal2', player: matchScore.Diagonal2.value.player } as const)
+  } else if (isSome(matchScore.Draw) && matchScore.Draw.value.count === 9) {
+    return some({ type: 'Draw' } as const)
   } else {
     return none
   }
@@ -107,35 +165,42 @@ function resultOfAccumulator(accumulator: Accumulator): Option<Result> {
 
 function resultTypeOfCoordinates(coordinates: Coordinates): ResultType[] {
   if (coordinates.column === 1 && coordinates.row === 1) {
-    return ['Col1', 'Row1', 'Dia1', 'Draw']
+    return ['Column1', 'Row1', 'Diagonal1', 'Draw']
   } else if (coordinates.column === 1 && coordinates.row === 2) {
-    return ['Col1', 'Row2', 'Draw']
+    return ['Column1', 'Row2', 'Draw']
   } else if (coordinates.column === 1 && coordinates.row === 3) {
-    return ['Col1', 'Row3', 'Dia2', 'Draw']
+    return ['Column1', 'Row3', 'Diagonal2', 'Draw']
   } else if (coordinates.column === 2 && coordinates.row === 1) {
-    return ['Col2', 'Row1', 'Draw']
+    return ['Column2', 'Row1', 'Draw']
   } else if (coordinates.column === 2 && coordinates.row === 2) {
-    return ['Col2', 'Row2', 'Dia1', 'Dia2', 'Draw']
+    return ['Column2', 'Row2', 'Diagonal1', 'Diagonal2', 'Draw']
   } else if (coordinates.column === 2 && coordinates.row === 3) {
-    return ['Col2', 'Row3', 'Draw']
+    return ['Column2', 'Row3', 'Draw']
   } else if (coordinates.column === 3 && coordinates.row === 1) {
-    return ['Col3', 'Row1', 'Dia2', 'Draw']
+    return ['Column3', 'Row1', 'Diagonal2', 'Draw']
   } else if (coordinates.column === 3 && coordinates.row === 2) {
-    return ['Col3', 'Row2', 'Draw']
+    return ['Column3', 'Row2', 'Draw']
   } else if (coordinates.column === 3 && coordinates.row === 3) {
-    return ['Col3', 'Row3', "Dia1", 'Draw']
+    return ['Column3', 'Row3', "Diagonal1", 'Draw']
   } else {
     return []
   }
 }
 
+const CONDITIONS = {
+  IS_DONE: (ctx: Context) => isSome(ctx.result),
+  IS_VALID_PLAY: (ctx: Context, e: PlayedEvent) => !!ctx.board.find(
+    cell =>
+      cell.column === e.payload.column
+      &&
+      cell.row === e.payload.row
+      &&
+      cell.state.kind === 'Playable'
+  )
+}
+
 const ACTIONS = {
-  ASSIGN_TURN: assign<Context, PlayedEvent>({
-    turn: (ctx) => ctx.turn === 'X'
-      ? 'O'
-      : 'X',
-  }),
-  ASSIGN_BOARD: assign<Context, PlayedEvent>({
+  ASSIGN_BOARD: (player: Player) => assign<Context, PlayedEvent>({
     board: (ctx, e) => ctx.board.map(
       cell => (
         cell.column === e.payload.column
@@ -145,18 +210,16 @@ const ACTIONS = {
         ?
         ({
           ...cell,
-          action: {
+          state: {
             kind: 'Played',
-            player: ctx.turn
+            player: player,
           }
         })
         : cell
-    ),
+    ) as Board,
   }),
-  ASSIGN_ACC: assign<Context, PlayedEvent>(
+  ASSIGN_MATCH_SCORE: (player: Player) => assign<Context, PlayedEvent>(
     (ctx, e) => {
-
-
       const acc = pipe(
         resultTypeOfCoordinates(e.payload),
         oldAcc => oldAcc.reduce(
@@ -165,91 +228,29 @@ const ACTIONS = {
             [curr]: pipe(
               acc[curr],
               fold(
-                () => some({ player: ctx.turn, count: 1 }),
+                () => some({ player: player, count: 1 }),
                 prev =>
                   (
                     curr === 'Draw'
                     ||
-                    prev.player === ctx.turn
+                    prev.player === player
                   )
-                    ? some({ player: ctx.turn, count: prev.count + 1 })
+                    ? some({ player: player, count: prev.count + 1 })
                     : some(prev)
               )
             )
           }),
-          ctx.accumulators
+          ctx.matchScore
         )
       )
 
       return {
-        result: resultOfAccumulator(acc),
-        accumulators: acc
+        result: resultOfMatchScore(acc),
+        matchScore: acc
       }
     }
   ),
-}
-
-const DEFAULT_CONTEXT: Context = {
-  result: none,
-  turn: 'X',
-  accumulators: {
-    'Draw': none,
-    'Row1': none,
-    'Row2': none,
-    'Row3': none,
-    'Col1': none,
-    'Col2': none,
-    'Col3': none,
-    'Dia1': none,
-    'Dia2': none,
-  },
-  board: [
-    {
-      row: 1,
-      column: 1,
-      action: { kind: 'Click' },
-    },
-    {
-      row: 2,
-      column: 1,
-      action: { kind: 'Click' },
-    },
-    {
-      row: 3,
-      column: 1,
-      action: { kind: 'Click' },
-    },
-    {
-      row: 1,
-      column: 2,
-      action: { kind: 'Click' },
-    },
-    {
-      row: 2,
-      column: 2,
-      action: { kind: 'Click' },
-    },
-    {
-      row: 3,
-      column: 2,
-      action: { kind: 'Click' },
-    },
-    {
-      row: 1,
-      column: 3,
-      action: { kind: 'Click' },
-    },
-    {
-      row: 2,
-      column: 3,
-      action: { kind: 'Click' },
-    },
-    {
-      row: 3,
-      column: 3,
-      action: { kind: 'Click' },
-    },
-  ]
+  ASSIGN_DEFAULT_CONTEXT: assign<Context, RestartedEvent>(() => DEFAULT_CONTEXT),
 }
 
 const machine = Machine<Context, Scheme, Event>({
@@ -258,45 +259,43 @@ const machine = Machine<Context, Scheme, Event>({
   context: DEFAULT_CONTEXT,
   states: {
     X: {
+      always: {
+        cond: CONDITIONS.IS_DONE,
+        target: 'DONE',
+      },
       on: {
-        '': {
-          cond: (ctx) => isSome(ctx.result),
-          target: 'DONE',
-        },
         PLAYED: {
+          cond: CONDITIONS.IS_VALID_PLAY,
           target: 'O',
           actions: [
-            ACTIONS.ASSIGN_ACC,
-            ACTIONS.ASSIGN_BOARD,
-            ACTIONS.ASSIGN_TURN,
+            ACTIONS.ASSIGN_MATCH_SCORE('X'),
+            ACTIONS.ASSIGN_BOARD('X'),
           ],
         },
       },
     },
     O: {
+      always: {
+        cond: CONDITIONS.IS_DONE,
+        target: 'DONE',
+      },
       on: {
-        '': {
-          cond: (ctx) => isSome(ctx.result),
-          target: 'DONE',
-        },
         PLAYED: {
-          target: 'O',
+          cond: CONDITIONS.IS_VALID_PLAY,
+          target: 'X',
           actions: [
-            ACTIONS.ASSIGN_ACC,
-            ACTIONS.ASSIGN_BOARD,
-            ACTIONS.ASSIGN_TURN,
+            ACTIONS.ASSIGN_MATCH_SCORE('O'),
+            ACTIONS.ASSIGN_BOARD('O'),
           ],
         },
       },
     },
     DONE: {
       on: {
-        RESTART: {
+        RESTARTED: {
           target: 'X',
           actions: [
-            assign(
-              () => DEFAULT_CONTEXT
-            )
+            ACTIONS.ASSIGN_DEFAULT_CONTEXT,
           ]
         }
       }
@@ -307,16 +306,15 @@ const machine = Machine<Context, Scheme, Event>({
 function App() {
 
   const [state, send] = useMachine(machine)
-  console.log(state)
 
   return (
     < div
       style={{
         display: 'grid',
-        width: 108,
-        height: 144,
         gridTemplateColumns: '36px 36px 36px',
         gridTemplateRows: '36px 36px 36px 36px 36px',
+        width: 108,
+        height: 180,
         margin: 'auto auto',
       }
       }
@@ -326,8 +324,8 @@ function App() {
           pipe(
             state.context.result,
             fold(
-              () => `${state.context.turn} Turn`,
-              r => (r.result === 'Draw')
+              () => `${state.matches('X') ? 'X' : 'O'} Turn`,
+              r => (r.type === 'Draw')
                 ? 'Draw'
                 : `${r.player} Won`
             )
@@ -352,9 +350,6 @@ function App() {
           gridRow: '2/4',
           zIndex: 0,
         }}
-        onClick={() => {
-          console.log('background')
-        }}
       />
       {
         state.context.board.map(
@@ -368,17 +363,15 @@ function App() {
                 gridRowEnd: cell.column + 1,
                 zIndex: 2,
                 backgroundImage:
-                  (cell.action.kind === 'Played')
-                    ? `url(${(cell.action.player === 'X') ? playerX : playerO})`
+                  (cell.state.kind === 'Played')
+                    ? `url(${(cell.state.player === 'X') ? playerX : playerO})`
                     : 'none',
                 backgroundSize: '80%',
                 backgroundRepeat: 'no-repeat',
                 backgroundPosition: 'center',
               }}
               onClick={() => {
-                if (cell.action.kind === 'Click') {
-                  send({ type: 'PLAYED', payload: { row: cell.row, column: cell.column } })
-                }
+                send({ type: 'PLAYED', payload: { row: cell.row, column: cell.column } })
               }}
             />
           )
@@ -388,7 +381,7 @@ function App() {
         pipe(
           state.context.result,
           chain(
-            x => x.result === 'Draw'
+            x => x.type === 'Draw'
               ? none
               : some(x)
           ),
@@ -396,7 +389,7 @@ function App() {
             () => null,
             res => (
               <img
-                src={RESULT_TO_FIGURE[res.result]}
+                src={RESULT_TO_FIGURE[res.type]}
                 height={108}
                 width={108}
                 alt="grid"
@@ -424,7 +417,7 @@ function App() {
                   }}
                   children="Restart Game"
                   onClick={() => {
-                    send({ type: 'RESTART' })
+                    send({ type: 'RESTARTED' })
                   }}
                 />
               )
