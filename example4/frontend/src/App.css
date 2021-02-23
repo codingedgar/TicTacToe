@@ -1,0 +1,13 @@
+.btn-restart-game {  
+  color: #fff;
+  background-color: #4299e1;
+  border-radius: .25rem ;
+  font-weight: 700;
+  border: 0;
+  margin: 5px 0px;
+  cursor: pointer;
+}
+
+.btn-restart-game:hover {  
+background-color: #3182ce;
+}
